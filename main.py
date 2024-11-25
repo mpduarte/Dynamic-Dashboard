@@ -1,6 +1,6 @@
-from app import app
+from app import app, socketio
 
 if __name__ == "__main__":
-    from gevent.pywsgi import WSGIServer
-    http_server = WSGIServer(('0.0.0.0', 5000), app)
-    http_server.serve_forever()
+    import eventlet
+    eventlet.monkey_patch()
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True, use_reloader=True, log_output=True)
