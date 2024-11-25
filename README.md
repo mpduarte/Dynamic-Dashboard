@@ -42,6 +42,18 @@ This dynamic dashboard application provides a sleek, modern interface with real-
 - Fallback handling
 - Background overlay effects
 
+### Upload System
+- Multiple file upload support (JPEG/PNG formats)
+- Maximum total upload size: 50MB
+- Per-file size limit: 10MB
+- Client-side validation for file types and sizes
+- Server-side error handling with informative messages
+- Automatic file permission management (755 for directories, 644 for files)
+- Secure filename handling
+- Upload progress indication
+- Batch upload processing
+- Proper error states and user feedback
+
 ### Glass Morphism Effects
 - Translucent widget backgrounds
 - Blur effects
@@ -150,6 +162,59 @@ The deployment script automatically configures Nginx with:
 
 ## Usage
 
+### Upload Endpoint Usage
+
+#### Endpoint Details
+- URL: `/upload`
+- Method: POST
+- Content-Type: multipart/form-data
+
+#### File Requirements
+- Supported formats: JPEG/JPG and PNG
+- Maximum total upload size: 50MB
+- Maximum individual file size: 10MB
+- Multiple files can be uploaded simultaneously
+
+#### Example Usage
+```html
+<form action="/upload" method="POST" enctype="multipart/form-data">
+    <input type="file" name="photos" accept="image/jpeg,image/png" multiple>
+    <button type="submit">Upload</button>
+</form>
+```
+
+#### Response Handling
+- Success: Redirects back to upload page with success message
+- Error: Redirects back to upload page with error message
+
+#### Common Error Cases
+- File too large (>10MB per file)
+- Total upload size exceeds 50MB
+- Unsupported file type
+- Permission errors
+- Storage errors
+
+#### Configuration Settings
+- Environment Variables:
+  - `MAX_CONTENT_LENGTH`: Maximum total request size (default: 50MB)
+  - `UPLOAD_FOLDER`: Custom upload directory path (default: static/images)
+
+- File Permissions:
+  - Directories: 755 (rwxr-xr-x)
+  - Files: 644 (rw-r--r--)
+  - Owner: www-data (web server user)
+
+- Nginx Settings:
+  - client_max_body_size: 50M
+  - Location block configuration for /upload
+
+- Upload Restrictions:
+  - Allowed formats: JPEG/JPG, PNG
+  - Maximum individual file size: 10MB
+  - Maximum total upload size: 50MB
+  - Automatic file type validation
+  - Secure filename generation
+
 ### Widget Descriptions
 
 #### Clock Widget
@@ -218,11 +283,65 @@ python main.py
 - Secure file handling
 - Environment variable protection
 - SSL certificate validation
+- Upload size restrictions (50MB total, 10MB per file)
+- File type validation (JPEG/PNG only)
+- Automatic permission management (755 for directories, 644 for files)
+- Secure filename generation and handling
+- Server-side file validation
 
 ## Known Issues
 - Weather API may experience occasional timeouts
 - Calendar sync might be delayed during server maintenance
-- Image uploads limited to PNG format
+- Image uploads limited to PNG and JPG formats
+
+## Version History
+
+Current Version: 1.0.0
+
+### Changelog
+
+#### Version 1.0.0 (2024-11-25)
+Initial release with complete feature set:
+- Core Features
+  * Glass-morphism UI implementation with responsive design
+  * Digital clock widget with real-time updates
+  * Weather widget with OpenWeatherMap API integration
+  * Calendar widget with iCloud WebDAV support
+  * Background image carousel with 10-second transitions
+  * Multiple image upload system (JPEG/PNG)
+
+- Improvements and Optimizations
+  * Enhanced calendar event parsing for WebDAV properties
+  * Standardized container widths and styling
+  * Implemented responsive breakpoints for all screen sizes
+  * Added smooth container transition animations
+  * Increased background darkening to 20% for better readability
+  * Calendar widget now shows only start time for better clarity
+
+- Upload System Enhancements
+  * Support for both JPEG and PNG formats
+  * Multiple file upload capability
+  * Total upload size limit: 50MB
+  * Individual file size limit: 10MB
+  * Proper file permissions (755 directories, 644 files)
+
+- Bug Fixes
+  * Fixed Invalid Date display in calendar events
+  * Resolved missing calendar events issue
+  * Fixed upload functionality for Raspberry Pi deployment
+  * Corrected calendar widget toLowerCase undefined error
+  * Fixed /upload route 404 error
+  * Resolved 413 Request Entity Too Large error
+  * Fixed static folder permissions
+  * Corrected weather widget 404 error
+  * Fixed calendar event TypeError issues
+
+- Documentation
+  * Comprehensive README with feature documentation
+  * Detailed deployment instructions
+  * API integration guides
+  * Security considerations
+  * Configuration settings
 
 ## Support
 For questions, bug reports, or feature requests, please open an issue in the repository.

@@ -370,35 +370,59 @@ def parse_ical_event(event, timezone):
         if not start or not hasattr(start, 'dt'):
             logger.error(f"Event missing start date or invalid format: {event.get('summary', 'No Title')}")
             return None
-            
-        # Debug logging for timezone conversion
-        logger.info(f"Processing event: {event.get('summary')} with start: {start.dt}")
+
+        # Get event summary for logging
+        summary = event.get('summary', 'No Title')
+        logger.info(f"Processing event: {summary} with start: {start.dt}")
         logger.info(f"Event timezone info: {getattr(start.dt, 'tzinfo', 'No timezone')}")
-            
-        # For all-day events
+
+        # Handle all-day events (don't apply timezone conversion)
         if isinstance(start.dt, date) and not isinstance(start.dt, datetime):
             start_date = start.dt.strftime('%Y-%m-%d')
-            logger.info(f"All-day event: {event.get('summary')} on {start_date}")
+            logger.info(f"All-day event: {summary} on {start_date}")
             start_time = None
-        # For events with specific times
+            is_all_day = True
+        # Handle events with specific times
         else:
             try:
-                # Handle already localized datetimes
+                # Convert to UTC first if needed
                 if hasattr(start.dt, 'tzinfo') and start.dt.tzinfo:
-                    localized_dt = start.dt.astimezone(timezone)
+                    # Already has timezone info
+                    utc_dt = start.dt.astimezone(pytz.UTC)
                 else:
-                    # Assume UTC for naive datetimes
-                    aware_dt = pytz.UTC.localize(start.dt)
-                    localized_dt = aware_dt.astimezone(timezone)
-                start_date = localized_dt.date().strftime('%Y-%m-%d')
-                start_time = localized_dt.strftime('%H:%M:%S')
-                
+                    # Naive datetime - assume UTC
+                    utc_dt = pytz.UTC.localize(start.dt)
+
+                # Convert to target timezone
+                local_dt = utc_dt.astimezone(timezone)
+                start_date = local_dt.strftime('%Y-%m-%d')
+                start_time = local_dt.strftime('%H:%M:%S')
+                is_all_day = False
+
+                # Store timezone offset for client-side handling
+                tz_offset = local_dt.utcoffset().total_seconds() / 3600
+
                 # Validate parsed date
                 parsed_date = datetime.strptime(start_date, '%Y-%m-%d').date()
                 today = datetime.now(timezone).date()
                 logger.info(f"Comparing event date {parsed_date} with today {today}")
+
+                # Include timezone information in the response
+                return {
+                    'summary': summary,
+                    'start_date': start_date,
+                    'start_time': start_time,
+                    'is_all_day': is_all_day,
+                    'timezone_offset': tz_offset,
+                    'location': str(event.get('location', '')),
+                    'description': str(event.get('description', '')),
+                    'status': str(event.get('status', 'confirmed')),
+                    'classification': str(event.get('class', 'public')),
+                    'recurrence': bool(event.get('rrule'))
+                }
+
             except Exception as e:
-                logger.error(f"Error parsing datetime for event {event.get('summary', 'No Title')}: {str(e)}")
+                logger.error(f"Error parsing datetime for event {summary}: {str(e)}")
                 return None
             
         # Process end datetime
