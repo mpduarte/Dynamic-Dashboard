@@ -61,15 +61,48 @@
         <div class="calendar-grid"></div>
     </div>
 
+    <!-- Doorbell Camera Widget -->
+    <div id="doorbell-widget" class="doorbell-widget glass-panel">
+        <h3><i class="fas fa-video"></i> Doorbell Camera</h3>
+        <div id="doorbell-feed" class="doorbell-feed">
+            <img src="/api/doorbell/stream" alt="Doorbell Feed">
+        </div>
+        <div id="doorbell-events" class="doorbell-events">
+            <!-- Events will be populated dynamically -->
+        </div>
+    </div>
     <!-- Clock Widget Container -->
     <div class="clock-container glass-panel">
         <h3><i class="fas fa-clock"></i> Clock</h3>
+    <script src="{{ url_for('static', filename='js/camera.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/camera.css') }}">
         <div class="empty-clock-space">
             <div id="digital-clock"></div>
         </div>
     </div>
 
+    <!-- Doorbell Widget -->
+    <div id="doorbell-widget" class="glass-panel" style="display: none;">
+        <h2><i class="fas fa-video"></i> Doorbell Camera</h2>
+        <div id="doorbell-feed" class="doorbell-feed"></div>
+        <div id="doorbell-events" class="doorbell-events"></div>
+        <div class="doorbell-widget" id="doorbell-widget" style="display: none;">
+        <h3><i class="fas fa-doorbell"></i> Doorbell Camera</h3>
+        <div class="doorbell-feed" id="doorbell-feed"></div>
+        <div class="doorbell-controls">
+            <button class="answer-btn" onclick="answerDoorbell()">
+                <i class="fas fa-phone"></i> Answer
+            </button>
+            <button class="ignore-btn" onclick="document.getElementById('doorbell-widget').style.display='none'">
+                <i class="fas fa-times"></i> Ignore
+            </button>
+        </div>
+        <div class="doorbell-events" id="doorbell-events"></div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/camera.js') }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script src="{{ url_for('static', filename='js/carousel.js') }}"></script>
     <script src="{{ url_for('static', filename='js/weather.js') }}"></script>
     <script src="{{ url_for('static', filename='js/calendar.js') }}"></script>

@@ -11,3 +11,11 @@ python-dotenv
 pytz
 requests
 werkzeug
+aiohttp
+pyunifi
+websockets
+eventlet
+flask-socketio
+unifi-api
+python-engineio
+python-socketio

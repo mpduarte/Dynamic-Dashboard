@@ -29,6 +29,10 @@ import requests
 import pytz
 from icalendar import Calendar, Event, vDDDTypes
 from flask import Flask, render_template, jsonify, request, flash, redirect, url_for
+from flask_socketio import SocketIO, emit
+import json
+import threading
+import time
 from requests.exceptions import SSLError, RequestException, ConnectionError
 
 logger = logging.getLogger(__name__)
@@ -56,12 +60,133 @@ except Exception as e:
     logger.error(f"Error setting up images folder: {str(e)}")
     raise
 
+# Initialize Flask app
 app = Flask(__name__, static_folder=static_folder)
-# Configure maximum file size (10MB) and maximum request size (50MB)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max request size
 app.secret_key = os.urandom(24)
-import os
-import stat
+
+# Initialize SocketIO
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+
+# Store active WebSocket connections
+ws_connections = set()
+
+def get_protect_api():
+    """Get UniFi API connection"""
+    try:
+        from pyunifi.controller import Controller
+        controller = Controller(
+            host=os.environ['UNIFI_HOST'],
+            username=os.environ['UNIFI_USERNAME'],
+            password=os.environ['UNIFI_PASSWORD'],
+            version='UDMP-unifiOS',
+            port=int(os.environ['UNIFI_PORT']),
+            ssl_verify=False
+        )
+        return controller
+    except Exception as e:
+        logger.error(f"Error connecting to UniFi API: {str(e)}")
+        return None
+
+def doorbell_event_monitor():
+    """Monitor doorbell events in background thread"""
+    last_event_time = datetime.now()
+    retry_interval = 1
+    max_retry_interval = 30
+    
+    while True:
+        try:
+            controller = get_protect_api()
+            if not controller:
+                logger.error("Failed to connect to UniFi controller")
+                time.sleep(retry_interval)
+                continue
+            
+            # Get all devices
+            devices = controller.get_devices()
+            if not devices:
+                logger.warning("No devices found")
+                time.sleep(retry_interval)
+                continue
+            
+            # Find the doorbell camera
+            doorbell = next((dev for dev in devices if 'G4 Doorbell' in dev.get('model', '')), None)
+            
+            if doorbell:
+                # Get device events using API
+                try:
+                    events = controller._api_post('stat/event', {'_limit': 10, 'mac': doorbell['mac']})
+                    current_time = datetime.now()
+                    
+                    if events:
+                        for event in events:
+                            event_time = datetime.fromtimestamp(event.get('time', 0) / 1000)
+                            if event_time > last_event_time:
+                                event_type = event.get('eventType', '').lower()
+                                if event_type in ['ring', 'motion']:
+                                    # Get snapshot using API
+                                    snapshot_url = None
+                                    try:
+                                        snapshot_response = controller._api_post(
+                                            'snapshots',
+                                            {'mac': doorbell['mac']}
+                                        )
+                                        if snapshot_response and 'data' in snapshot_response:
+                                            snapshot_url = f"data:image/jpeg;base64,{snapshot_response['data']}"
+                                    except Exception as snap_err:
+                                        logger.error(f"Error getting snapshot: {snap_err}")
+                                
+                                event_data = {
+                                    'type': event_type,
+                                    'timestamp': event_time.isoformat(),
+                                    'thumbnail': snapshot_url,
+                                    'camera_name': doorbell.get('name', 'Doorbell')
+                                }
+                                
+                                if ws_connections:
+                                    socketio.emit('doorbell_event', event_data, broadcast=True)
+                                    logger.info(f"Doorbell event emitted: {event_type} from {event_data['camera_name']}")
+                    
+                    last_event_time = current_time
+                    retry_interval = 1  # Reset retry interval on success
+                
+                event_data = {
+                                        'type': event_type,
+                                        'timestamp': event_time.isoformat(),
+                                        'thumbnail': snapshot_url,
+                                        'camera_name': doorbell.get('name', 'Doorbell')
+                                    }
+                                    
+                                    if ws_connections:
+                                        socketio.emit('doorbell_event', event_data, broadcast=True)
+                                        logger.info(f"Doorbell event emitted: {event_type} from {event_data['camera_name']}")
+                        
+                        last_event_time = current_time
+                        retry_interval = 1  # Reset retry interval on success
+            
+            time.sleep(1)  # Check for events every second
+            
+        except Exception as e:
+            logger.error(f"Error in doorbell event monitor: {str(e)}")
+            retry_interval = min(retry_interval * 2, max_retry_interval)  # Exponential backoff
+            time.sleep(retry_interval)
+
+@socketio.on('connect')
+def handle_connect():
+    """Handle new WebSocket connections"""
+    ws_connections.add(request.sid)
+    logger.info(f"New WebSocket connection: {request.sid}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle WebSocket disconnections"""
+    if request.sid in ws_connections:
+        ws_connections.remove(request.sid)
+    logger.info(f"WebSocket disconnected: {request.sid}")
+
+# Start doorbell event monitor in background thread
+doorbell_thread = threading.Thread(target=doorbell_event_monitor, daemon=True)
+doorbell_thread.start()
 
 # Set default umask for new files
 os.umask(0o022)
@@ -315,6 +440,63 @@ def get_calendar_events():
     except Exception as e:
         logger.error(f"Error fetching calendar events: {str(e)}")
         return jsonify({'error': str(e)}), 500
+# UniFi Doorbell Camera Routes
+@app.route('/api/doorbell/stream')
+def get_doorbell_stream():
+    """Get the current doorbell camera stream"""
+    try:
+        controller = get_protect_api()
+        if not controller:
+            return jsonify({'error': 'Failed to connect to UniFi controller'}), 500
+        
+        # Get all devices
+        devices = controller.get_devices()
+        doorbell = next((dev for dev in devices if 'G4 Doorbell' in dev.get('model', '')), None)
+        
+        if not doorbell:
+            logger.error("No doorbell camera found")
+            return jsonify({'error': 'No doorbell camera found'}), 404
+            
+        try:
+            # Get RTSP stream URL for the doorbell camera
+            # Use controller's port for RTSP stream
+            rtsp_port = int(os.environ.get('UNIFI_PORT', 7447))
+            stream_url = f"rtsp://{os.environ['UNIFI_USERNAME']}:{os.environ['UNIFI_PASSWORD']}@{os.environ['UNIFI_HOST']}:{rtsp_port}/video/{doorbell['mac']}"
+            return jsonify({'stream_url': stream_url})
+        except Exception as e:
+            logger.error(f"Error getting stream URL: {str(e)}")
+            return jsonify({'error': 'Failed to get stream URL'}), 500
+
+    except Exception as e:
+        logger.error(f"Error accessing doorbell camera: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/doorbell/answer', methods=['POST'])
+def answer_doorbell():
+    """Answer the doorbell ring"""
+    try:
+        nvr = get_protect_api()
+        
+        # Get the doorbell camera
+        devices = nvr.get_devices()
+        doorbell = next((dev for dev in devices if 'Doorbell' in dev.get('model', '')), None)
+        
+        if not doorbell:
+            logger.error("No doorbell camera found")
+            return jsonify({'error': 'No doorbell camera found'}), 404
+            
+        # Send command to answer doorbell (using UniFi Controller API)
+        try:
+            nvr._api_post(f'stat/device/{doorbell["_id"]}/audio/on')
+            return jsonify({'status': 'success'})
+        except Exception as e:
+            logger.error(f"Error activating doorbell audio: {str(e)}")
+            return jsonify({'error': 'Failed to activate doorbell audio'}), 500
+
+    except Exception as e:
+        logger.error(f"Error answering doorbell: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/weather')
 @rate_limit_decorator(min_interval=1)
 def get_weather():
