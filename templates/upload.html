@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Photo - Dynamic Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .container-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2rem;
+            padding: 2rem;
+            min-height: 100vh;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .upload-glass-panel {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 2rem;
+            transition: all 0.3s ease;
+        }
+
+        /* Responsive Breakpoints */
+        @media (max-width: 768px) {
+            .container-wrapper {
+                padding: 1.5rem;
+                gap: 1.5rem;
+            }
+            .upload-glass-panel {
+                padding: 1.5rem;
+                margin: 0 1rem;
+            }
+            h2 {
+                font-size: 1.5rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .container-wrapper {
+                padding: 1rem;
+                gap: 1rem;
+            }
+            .upload-glass-panel {
+                padding: 1rem;
+                margin: 0 0.5rem;
+            }
+            h2 {
+                font-size: 1.25rem;
+            }
+            .file-input-container {
+                padding: 15px;
+            }
+            .upload-icon {
+                font-size: 1.5rem;
+            }
+        }
+
+        @media (max-width: 320px) {
+            .container-wrapper {
+                padding: 0.75rem;
+            }
+            .upload-glass-panel {
+                padding: 0.75rem;
+                margin: 0 0.25rem;
+            }
+            .file-input-container p {
+                font-size: 0.9rem;
+            }
+        }
+
+        .upload-container {
+            opacity: 0;
+            transform: translateY(20px) scale(0.98);
+            animation: containerAppear 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        .upload-container:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        @keyframes containerAppear {
+            0% {
+                opacity: 0;
+                transform: translateY(20px) scale(0.98);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        /* Add transition for hover effect */
+        .upload-glass-panel {
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                        box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                        backdrop-filter 0.4s ease,
+                        background 0.4s ease;
+        }
+
+        .upload-glass-panel:hover {
+            transform: translateY(-4px) scale(1.01);
+            box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.3),
+                       0 0 16px rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(16px);
+            background: rgba(255, 255, 255, 0.15);
+        }
+        .upload-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .file-input-container {
+            position: relative;
+            padding: 20px;
+            border: 2px dashed rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+        }
+        .file-input-container:hover {
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+        .file-input {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .upload-button {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 10px 20px;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .upload-button:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        .upload-icon {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: rgba(255, 255, 255, 0.8);
+        }
+    .alert {
+        background: rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        color: white;
+        margin: 1rem auto;
+        padding: 1rem;
+        border-radius: 10px;
+        max-width: 600px;
+        text-align: center;
+        z-index: 1000;
+    }
+        .alert-success {
+            border-left: 4px solid #28a745;
+        }
+        .alert-danger {
+            border-left: 4px solid #dc3545;
+        }
+        .alert-warning {
+            border-left: 4px solid #ffc107;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-wrapper">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}" role="alert">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="upload-container upload-glass-panel">
+            <h2><i class="fas fa-cloud-upload-alt"></i> Upload Photo</h2>
+            <form class="upload-form" action="/upload" method="POST" enctype="multipart/form-data">
+                <div class="file-input-container">
+                    <i class="fas fa-image upload-icon"></i>
+                    <p>Click to select or drag and drop multiple JPEG/PNG images</p>
+                    <p class="text-muted small">(Maximum 10MB per file)</p>
+                    <input type="file" name="photos" accept="image/jpeg,image/jpg" class="file-input" multiple required>
+                    <div id="fileList" class="mt-2 text-light"></div>
+                </div>
+                <button type="submit" class="upload-button">
+                    <i class="fas fa-upload"></i> Upload Photo
+                </button>
+            </form>
+            <div class="mt-3">
+                <a href="/" class="text-light"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+            </div>
+        </div>
+
+        <div class="upload-container upload-glass-panel">
+        <h2><i class="fas fa-cog"></i> Configuration</h2>
+        <form class="upload-form" method="POST" action="/config">
+            <div class="form-group">
+                <label for="weather_api_key">OpenWeatherMap API Key</label>
+                <input type="password" class="form-control" id="weather_api_key" name="weather_api_key" 
+                       value="{{ '••••••••' if weather_api_key else '' }}" placeholder="Enter API key">
+            </div>
+            <div class="form-group">
+                <label for="calendar_url">iCloud Calendar Feed URL</label>
+                <input type="url" class="form-control" id="calendar_url" name="calendar_url" 
+                       value="{{ calendar_url if calendar_url else '' }}" placeholder="Enter calendar URL">
+            </div>
+            <button type="submit" class="upload-button">
+                <i class="fas fa-save"></i> Save Configuration
+            </button>
+        </form>
+    </div>
+<script>
+document.querySelector('.file-input').addEventListener('change', function(e) {
+    const fileList = document.getElementById('fileList');
+    fileList.innerHTML = '';
+    
+    if (this.files.length > 0) {
+        const list = document.createElement('ul');
+        list.className = 'list-unstyled';
+        
+        let totalSize = Array.from(this.files).reduce((sum, file) => sum + file.size, 0);
+        const maxTotalSize = 50 * 1024 * 1024; // 50MB
+        
+        if (totalSize > maxTotalSize) {
+            fileList.innerHTML = '<div class="text-danger">Total size exceeds 50MB limit</div>';
+            this.value = '';
+            return;
+        }
+        
+        Array.from(this.files).forEach(file => {
+            const size = (file.size / (1024 * 1024)).toFixed(2);
+            const extension = file.name.split('.').pop().toLowerCase();
+            const isValidType = ['jpg', 'jpeg', 'png'].includes(extension);
+            
+            const li = document.createElement('li');
+            li.className = !isValidType ? 'text-danger' : (size > 10 ? 'text-danger' : 'text-light');
+            
+            let errorMessage = '';
+            if (!isValidType) {
+                errorMessage = ' - Invalid file type! Only JPEG/JPG/PNG allowed';
+            } else if (size > 10) {
+                errorMessage = ' - File too large!';
+            }
+            
+            li.innerHTML = `${file.name} (${size}MB)${errorMessage}`;
+            list.appendChild(li);
+        });
+        
+        const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(2);
+        const totalSizeInfo = document.createElement('div');
+        totalSizeInfo.className = 'mt-2 text-light';
+        totalSizeInfo.innerHTML = `Total size: ${totalSizeMB}MB`;
+        list.appendChild(totalSizeInfo);
+        
+        fileList.appendChild(list);
+    }
+});
+
+// Add accept attribute to file input
+document.querySelector('.file-input').setAttribute('accept', '.jpg,.jpeg,.png');
+</script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+        }
+    </style>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuration - Dynamic Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .config-container {
+            max-width: 1800px;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 35px;
+        }
+        .config-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: rgba(255, 255, 255, 0.9);
+        }
+        .form-control {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 10px;
+        }
+        .form-control:focus {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+            color: white;
+            box-shadow: none;
+        }
+        .config-button {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 10px 20px;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .config-button:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        @media (max-width: 992px) {
+            .config-container {
+                max-width: 90%;
+                padding: 25px;
+            }
+        }
+        @media (max-width: 576px) {
+            .config-container {
+                max-width: 95%;
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="background-carousel">
+        <div class="carousel-overlay"></div>
+    </div>
+    <div class="config-container glass-panel">
+        <h2><i class="fas fa-cog"></i> Configuration</h2>
+        <form class="config-form" method="POST">
+            <div class="form-group">
+                <label for="weather_api_key">OpenWeatherMap API Key</label>
+                <input type="password" class="form-control" id="weather_api_key" name="weather_api_key" 
+                       value="{{ '••••••••' if weather_api_key else '' }}" placeholder="Enter API key">
+            </div>
+            <div class="form-group">
+                <label for="calendar_url">iCloud Calendar Feed URL</label>
+                <input type="url" class="form-control" id="calendar_url" name="calendar_url" 
+                       value="{{ calendar_url if calendar_url else '' }}" placeholder="Enter calendar URL">
+            </div>
+            <button type="submit" class="config-button">
+                <i class="fas fa-save"></i> Save Configuration
+            </button>
+        </form>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} mt-3">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        <div class="mt-3">
+            <a href="/" class="text-light"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/carousel.js') }}"></script>
+</body>
+</html>
