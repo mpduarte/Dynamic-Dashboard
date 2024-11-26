@@ -86,6 +86,43 @@
                 <input type="url" class="form-control" id="calendar_url" name="calendar_url" 
                        value="{{ calendar_url if calendar_url else '' }}" placeholder="Enter calendar URL">
             </div>
+            <div class="form-group">
+                <label for="unifi_host">UniFi Host <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="unifi_host" name="unifi_host" 
+                       value="{{ '••••••••' if unifi_host else '' }}" 
+                       placeholder="Enter UniFi host (e.g., 192.168.1.1)"
+                       pattern="^[a-zA-Z0-9.-]+$"
+                       title="Enter a valid hostname or IP address"
+                       required>
+                <small class="form-text text-muted">Enter your UniFi controller's IP address or hostname</small>
+            </div>
+            <div class="form-group">
+                <label for="unifi_username">UniFi Username <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="unifi_username" name="unifi_username" 
+                       value="{{ '••••••••' if unifi_username else '' }}" 
+                       placeholder="Enter UniFi username"
+                       pattern="^[a-zA-Z0-9@._-]+$"
+                       title="Enter a valid username"
+                       required>
+                <small class="form-text text-muted">Your UniFi Protect administrator username</small>
+            </div>
+            <div class="form-group">
+                <label for="unifi_password">UniFi Password <span class="text-danger">*</span></label>
+                <input type="password" class="form-control" id="unifi_password" name="unifi_password" 
+                       value="{{ '••••••••' if unifi_password else '' }}" 
+                       placeholder="Enter UniFi password"
+                       required>
+                <small class="form-text text-muted">Your UniFi Protect administrator password</small>
+            </div>
+            <div class="form-group">
+                <label for="unifi_port">UniFi Port</label>
+                <input type="number" class="form-control" id="unifi_port" name="unifi_port" 
+                       value="{{ unifi_port }}" 
+                       placeholder="Enter UniFi port (default: 443)"
+                       min="1"
+                       max="65535">
+                <small class="form-text text-muted">Default port is 443 for HTTPS</small>
+            </div>
             <button type="submit" class="config-button">
                 <i class="fas fa-save"></i> Save Configuration
             </button>

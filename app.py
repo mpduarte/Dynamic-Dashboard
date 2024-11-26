@@ -1,7 +1,23 @@
 import os
+import cv2
+import numpy as np
+from flask_socketio import SocketIO, emit
+import base64
+from threading import Thread
+import time
+
 import uuid
 import logging
 import ssl
+from flask_socketio import SocketIO, emit
+import cv2
+import numpy as np
+import base64
+from threading import Thread
+import time
+
+# Initialize SocketIO
+socketio = SocketIO()
 import time
 import os
 import requests
@@ -75,15 +91,64 @@ def get_protect_api():
     """Get UniFi API connection"""
     try:
         from pyunifi.controller import Controller
+        import urllib3
+        import requests
+        from requests.adapters import HTTPAdapter
+        from urllib3.poolmanager import PoolManager
+        import ssl
+        
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        host = os.environ.get('UNIFI_HOST')
+        username = os.environ.get('UNIFI_USERNAME')
+        password = os.environ.get('UNIFI_PASSWORD')
+        port = int(os.environ.get('UNIFI_PORT', '443'))
+        
+        if not all([host, username, password]):
+            logger.error("Missing UniFi credentials in environment variables")
+            return None
+
+        class TLSAdapter(HTTPAdapter):
+            def init_poolmanager(self, connections, maxsize, block=False):
+                ctx = ssl.create_default_context()
+                # Support legacy TLS versions
+                ctx.options &= ~ssl.OP_NO_TLSv1
+                ctx.options &= ~ssl.OP_NO_TLSv1_1
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                self.poolmanager = PoolManager(
+                    num_pools=connections,
+                    maxsize=maxsize,
+                    block=block,
+                    ssl_context=ctx
+                )
+
+        session = requests.Session()
+        adapter = TLSAdapter()
+        session.mount('https://', adapter)
+        session.verify = False
+        
+        # Create controller with custom session
         controller = Controller(
-            host=os.environ['UNIFI_HOST'],
-            username=os.environ['UNIFI_USERNAME'],
-            password=os.environ['UNIFI_PASSWORD'],
+            host=host,
+            username=username,
+            password=password,
+            port=port,
             version='UDMP-unifiOS',
-            port=int(os.environ['UNIFI_PORT']),
             ssl_verify=False
         )
+        
+        # Update controller session
+        controller._session = session
+        controller._session.timeout = 30
+        
+        # Test connection
+        sites = controller.get_sites()
+        logger.info(f"Successfully connected to UniFi controller, found {len(sites)} sites")
         return controller
+    except ImportError as e:
+        logger.error(f"Missing required package: {str(e)}")
+        return None
     except Exception as e:
         logger.error(f"Error connecting to UniFi API: {str(e)}")
         return None
@@ -103,39 +168,55 @@ def doorbell_event_monitor():
                 continue
             
             # Get all devices
-            devices = controller.get_devices()
-            if not devices:
-                logger.warning("No devices found")
+            try:
+                devices = controller.get_devices()
+                if not devices:
+                    logger.warning("No devices found")
+                    time.sleep(retry_interval)
+                    continue
+                
+                # Find the doorbell camera
+                doorbell = next((dev for dev in devices if 'G4 Doorbell' in str(dev.get('model', ''))), None)
+                
+                if not doorbell:
+                    logger.warning("No doorbell camera found")
+                    time.sleep(retry_interval)
+                    continue
+            except Exception as e:
+                logger.error(f"Error getting devices: {str(e)}")
                 time.sleep(retry_interval)
                 continue
             
-            # Find the doorbell camera
-            doorbell = next((dev for dev in devices if 'G4 Doorbell' in dev.get('model', '')), None)
-            
-            if doorbell:
-                # Get device events using API
-                try:
-                    events = controller._api_post('stat/event', {'_limit': 10, 'mac': doorbell['mac']})
-                    current_time = datetime.now()
-                    
-                    if events:
-                        for event in events:
-                            event_time = datetime.fromtimestamp(event.get('time', 0) / 1000)
-                            if event_time > last_event_time:
-                                event_type = event.get('eventType', '').lower()
-                                if event_type in ['ring', 'motion']:
-                                    # Get snapshot using API
-                                    snapshot_url = None
-                                    try:
-                                        snapshot_response = controller._api_post(
-                                            'snapshots',
-                                            {'mac': doorbell['mac']}
-                                        )
-                                        if snapshot_response and 'data' in snapshot_response:
-                                            snapshot_url = f"data:image/jpeg;base64,{snapshot_response['data']}"
-                                    except Exception as snap_err:
-                                        logger.error(f"Error getting snapshot: {snap_err}")
-                                
+            # Get device events
+            try:
+                # Get events using the proper API endpoint
+                events = controller.get_events(
+                    mac=doorbell.get('mac'),
+                    limit=10,
+                    eventType=['ring', 'motion']
+                )
+                events_response = {'data': events} if events else None
+                current_time = datetime.now()
+                
+                if events_response and 'data' in events_response:
+                    for event in events_response['data']:
+                        event_time = datetime.fromtimestamp(event.get('time', 0) / 1000)
+                        if event_time > last_event_time:
+                            event_type = event.get('type', '').lower()
+                            if event_type in ['ring', 'motion']:
+                                # Get snapshot using API
+                                snapshot_url = None
+                                try:
+                                    snapshot_response = controller._api_request(
+                                        'get', 
+                                        f"protect/cameras/{doorbell['id']}/snapshot",
+                                        params={'force': 'true'}
+                                    )
+                                    if snapshot_response:
+                                        snapshot_url = f"data:image/jpeg;base64,{snapshot_response}"
+                                except Exception as snap_err:
+                                    logger.error(f"Error getting snapshot: {snap_err}")
+                            
                                 event_data = {
                                     'type': event_type,
                                     'timestamp': event_time.isoformat(),
@@ -146,23 +227,12 @@ def doorbell_event_monitor():
                                 if ws_connections:
                                     socketio.emit('doorbell_event', event_data, broadcast=True)
                                     logger.info(f"Doorbell event emitted: {event_type} from {event_data['camera_name']}")
-                    
-                    last_event_time = current_time
-                    retry_interval = 1  # Reset retry interval on success
                 
-                event_data = {
-                                        'type': event_type,
-                                        'timestamp': event_time.isoformat(),
-                                        'thumbnail': snapshot_url,
-                                        'camera_name': doorbell.get('name', 'Doorbell')
-                                    }
-                                    
-                                    if ws_connections:
-                                        socketio.emit('doorbell_event', event_data, broadcast=True)
-                                        logger.info(f"Doorbell event emitted: {event_type} from {event_data['camera_name']}")
-                        
-                        last_event_time = current_time
-                        retry_interval = 1  # Reset retry interval on success
+                last_event_time = current_time
+                retry_interval = 1  # Reset retry interval on success
+            except Exception as e:
+                logger.error(f"Error processing doorbell events: {str(e)}")
+                retry_interval = min(retry_interval * 2, max_retry_interval)
             
             time.sleep(1)  # Check for events every second
             
@@ -406,6 +476,124 @@ def upload_photo():
             
     return render_template('upload.html')
 
+@app.route('/config', methods=['GET', 'POST'])
+def config():
+    """Handle configuration settings"""
+    if request.method == 'POST':
+        try:
+            # Handle UniFi credentials
+            unifi_host = request.form.get('unifi_host', '').strip()
+            unifi_username = request.form.get('unifi_username', '').strip()
+            unifi_password = request.form.get('unifi_password', '').strip()
+            unifi_port = request.form.get('unifi_port', '443').strip()
+            
+            # Validate UniFi credentials
+            if any([unifi_host, unifi_username, unifi_password]):
+                if not all([unifi_host, unifi_username, unifi_password]):
+                    flash('All UniFi credentials are required', 'danger')
+                else:
+                    try:
+                        # Try to convert port to integer
+                        port = int(unifi_port)
+                        if port <= 0 or port > 65535:
+                            raise ValueError("Port must be between 1 and 65535")
+                        
+                        # Update environment variables
+                        os.environ['UNIFI_HOST'] = unifi_host
+                        os.environ['UNIFI_USERNAME'] = unifi_username
+                        os.environ['UNIFI_PASSWORD'] = unifi_password
+                        os.environ['UNIFI_PORT'] = str(port)
+                        
+                        # Test connection with new credentials
+                        controller = get_protect_api()
+                        if controller:
+                            flash('UniFi credentials updated successfully', 'success')
+                        else:
+                            flash('Failed to connect to UniFi controller with provided credentials', 'danger')
+                    except ValueError as ve:
+                        flash(f'Invalid port number: {str(ve)}', 'danger')
+                    except Exception as e:
+                        logger.error(f"Error testing UniFi credentials: {str(e)}")
+                        flash('Error connecting to UniFi controller', 'danger')
+            
+            # Handle other configuration settings
+            weather_api_key = request.form.get('weather_api_key', '').strip()
+            calendar_url = request.form.get('calendar_url', '').strip()
+            
+            if weather_api_key:
+                os.environ['OPENWEATHERMAP_API_KEY'] = weather_api_key
+                flash('Weather API key updated', 'success')
+            
+            if calendar_url:
+                os.environ['ICAL_FEED_URL'] = calendar_url
+                flash('Calendar URL updated', 'success')
+            
+            return redirect(url_for('config'))
+        except Exception as e:
+            logger.error(f"Error updating configuration: {str(e)}")
+            flash('Error updating configuration', 'danger')
+            return redirect(url_for('config'))
+    
+    # GET request - show current configuration
+    return render_template('config.html',
+        weather_api_key=bool(os.environ.get('OPENWEATHERMAP_API_KEY')),
+        calendar_url=os.environ.get('ICAL_FEED_URL'),
+        unifi_host=bool(os.environ.get('UNIFI_HOST')),
+        unifi_username=bool(os.environ.get('UNIFI_USERNAME')),
+        unifi_password=bool(os.environ.get('UNIFI_PASSWORD')),
+        unifi_port=os.environ.get('UNIFI_PORT', '443')
+    )
+    if request.method == 'POST':
+        try:
+            # Get form data
+            weather_api_key = request.form.get('weather_api_key', '').strip()
+            calendar_url = request.form.get('calendar_url', '').strip()
+            unifi_host = request.form.get('unifi_host', '').strip()
+            unifi_username = request.form.get('unifi_username', '').strip()
+            unifi_password = request.form.get('unifi_password', '').strip()
+            unifi_port = request.form.get('unifi_port', '').strip()
+
+            # Validate UniFi credentials
+            if any([unifi_host, unifi_username, unifi_password, unifi_port]):
+                if not all([unifi_host, unifi_username, unifi_password, unifi_port]):
+                    flash('All UniFi fields are required if any are provided', 'danger')
+                    return redirect(url_for('config'))
+
+                try:
+                    port = int(unifi_port)
+                    if port <= 0 or port > 65535:
+                        raise ValueError("Port must be between 1 and 65535")
+                except ValueError:
+                    flash('Invalid port number', 'danger')
+                    return redirect(url_for('config'))
+
+            # Save to environment variables
+            if weather_api_key:
+                os.environ['OPENWEATHERMAP_API_KEY'] = weather_api_key
+            if calendar_url:
+                os.environ['ICAL_FEED_URL'] = calendar_url
+            if all([unifi_host, unifi_username, unifi_password, unifi_port]):
+                os.environ['UNIFI_HOST'] = unifi_host
+                os.environ['UNIFI_USERNAME'] = unifi_username
+                os.environ['UNIFI_PASSWORD'] = unifi_password
+                os.environ['UNIFI_PORT'] = unifi_port
+
+            flash('Configuration saved successfully', 'success')
+            return redirect(url_for('config'))
+        except Exception as e:
+            logger.error(f"Error saving configuration: {str(e)}")
+            flash('Error saving configuration', 'danger')
+            return redirect(url_for('config'))
+
+    # Get existing values (masked)
+    return render_template('config.html',
+                         weather_api_key=bool(os.environ.get('OPENWEATHERMAP_API_KEY')),
+                         calendar_url=os.environ.get('ICAL_FEED_URL', ''),
+                         unifi_host=bool(os.environ.get('UNIFI_HOST')),
+                         unifi_username=bool(os.environ.get('UNIFI_USERNAME')),
+                         unifi_password=bool(os.environ.get('UNIFI_PASSWORD')),
+                         unifi_port=bool(os.environ.get('UNIFI_PORT')))
+
 @app.route('/api/calendar')
 @rate_limit_decorator(min_interval=1)
 def get_calendar_events():
@@ -436,10 +624,185 @@ def get_calendar_events():
         
         logger.info(f"Total events parsed: {len(events)}")
         return jsonify({'events': events})
+    except Exception as e:
+        logger.error(f"Error in calendar endpoint: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Import required modules for camera functionality
+from utils.motion_detection import MotionDetector, process_frame_for_detection
+
+# Initialize motion detector
+motion_detector = MotionDetector()
+import base64
+import cv2
+from threading import Thread
+import time
+from flask_socketio import SocketIO, emit
+
+# Initialize SocketIO
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+
+async def get_protect_api():
+    """Get UniFi Protect API connection with proper error handling"""
+    required_env_vars = ['UNIFI_HOST', 'UNIFI_USERNAME', 'UNIFI_PASSWORD']
+    
+    try:
+        # Check for required environment variables
+        missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
+        if missing_vars:
+            logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+            return None
+
+        from pyunifiprotect import ProtectApiClient
+        from pyunifiprotect.data import WSSubscriptionMessage
+        from aiohttp import ClientError
+        
+        try:
+            # Initialize UniFi Protect API client
+            nvr = await ProtectApiClient.login(
+                host=os.environ['UNIFI_HOST'],
+                port=int(os.environ.get('UNIFI_PORT', '443')),
+                username=os.environ['UNIFI_USERNAME'],
+                password=os.environ['UNIFI_PASSWORD'],
+                verify_ssl=False
+            )
+            
+            # Test connection by getting NVR info
+            await nvr.update()
+            return nvr
+            
+        except ClientError as ce:
+            logger.error(f"Network error connecting to UniFi Protect: {str(ce)}")
+            return None
+        except Exception as e:
+            logger.error(f"Error initializing UniFi Protect client: {str(e)}")
+            return None
+            
+    except ImportError as ie:
+        logger.error(f"Required module not found: {str(ie)}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error in get_protect_api: {str(e)}")
+        return None
+
+def get_protect_api_sync():
+    """Synchronous wrapper for get_protect_api"""
+    import asyncio
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(get_protect_api())
+    except Exception as e:
+        logger.error(f"Error in get_protect_api_sync: {str(e)}")
+        return None
+    finally:
+        loop.close()
+
+# UniFi Doorbell Camera Routes and WebSocket Events
+def get_camera_frame(camera):
+    """Get a frame from the camera stream"""
+    try:
+        ret, frame = camera.read()
+        if ret:
+            # Encode frame to JPEG
+            _, buffer = cv2.imencode('.jpg', frame)
+            # Convert to base64 for sending over WebSocket
+            frame_data = base64.b64encode(buffer).decode('utf-8')
+            return frame_data
+        return None
+    except Exception as e:
+        logger.error(f"Error capturing frame: {str(e)}")
+        return None
+
+async def stream_camera(doorbell, socket_id):
+    """Stream camera frames over WebSocket using UniFi Protect API"""
+    try:
+        async for frame in doorbell.get_camera_stream():
+            try:
+                # Process frame for motion and person detection
+                detection_result, message = process_frame_for_detection(frame, motion_detector)
+                
+                # Convert frame to JPEG
+                _, buffer = cv2.imencode('.jpg', frame)
+                # Convert to base64
+                frame_data = base64.b64encode(buffer).decode('utf-8')
+                
+                # Create response data
+                response_data = {
+                    'frame': frame_data,
+                    'detection': {
+                        'detected': detection_result,
+                        'message': message
+                    }
+                }
+                
+                # Emit frame and detection results to specific client
+                socketio.emit('camera_frame', response_data, room=socket_id)
+                
+                # If person detected, send additional alert
+                if detection_result and 'Person detected' in message:
+                    socketio.emit('person_detected', {
+                        'timestamp': time.time(),
+                        'message': 'Person detected at doorbell camera'
+                    }, room=socket_id)
+                
+                # Control frame rate
+                await asyncio.sleep(1/30)  # 30 FPS
+                
+            except Exception as frame_error:
+                logger.error(f"Error processing frame: {str(frame_error)}")
+                continue
+                
+    except Exception as e:
+        logger.error(f"Error in camera stream: {str(e)}")
+    finally:
+        # Cleanup
+        try:
+            await doorbell.close_camera_stream()
+        except Exception as cleanup_error:
+            logger.error(f"Error cleaning up camera stream: {str(cleanup_error)}")
+
+@socketio.on('connect')
+def handle_connect():
+    """Handle WebSocket connection"""
+    logger.info("Client connected to camera stream")
+
+@socketio.on('start_stream')
+async def handle_start_stream():
+    """Start camera stream when requested"""
+    try:
+        nvr = await get_protect_api()
+        if not nvr:
+            emit('stream_error', {'message': 'Failed to connect to UniFi controller'})
+            return
+
+        # Get doorbell cameras
+        doorbells = [cam for cam in nvr.cameras if 'G4 Doorbell' in cam.model]
+        if not doorbells:
+            emit('stream_error', {'message': 'No doorbell camera found'})
+            return
+
+        doorbell = doorbells[0]
+        
+        # Get socket ID for room-specific streaming
+        socket_id = request.sid
+        
+        # Start streaming in a background task
+        asyncio.create_task(stream_camera(doorbell, socket_id))
+        emit('stream_started', {'message': 'Camera stream started'})
         
     except Exception as e:
-        logger.error(f"Error fetching calendar events: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error starting camera stream: {str(e)}")
+        emit('stream_error', {'message': str(e)})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle WebSocket disconnection"""
+    try:
+        logger.info("Client disconnected from camera stream")
+    except Exception as e:
+        logger.error(f"Error in disconnect handler: {str(e)}")
+
 # UniFi Doorbell Camera Routes
 @app.route('/api/doorbell/stream')
 def get_doorbell_stream():
@@ -472,30 +835,47 @@ def get_doorbell_stream():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/doorbell/answer', methods=['POST'])
-def answer_doorbell():
+async def answer_doorbell():
     """Answer the doorbell ring"""
     try:
-        nvr = get_protect_api()
+        nvr = await get_protect_api()
+        if not nvr:
+            return jsonify({'error': 'Failed to connect to UniFi controller'}), 500
         
-        # Get the doorbell camera
-        devices = nvr.get_devices()
-        doorbell = next((dev for dev in devices if 'Doorbell' in dev.get('model', '')), None)
-        
-        if not doorbell:
+        # Get doorbell camera
+        doorbells = [cam for cam in nvr.cameras if 'G4 Doorbell' in cam.model]
+        if not doorbells:
             logger.error("No doorbell camera found")
             return jsonify({'error': 'No doorbell camera found'}), 404
             
-        # Send command to answer doorbell (using UniFi Controller API)
+        doorbell = doorbells[0]
+        
         try:
-            nvr._api_post(f'stat/device/{doorbell["_id"]}/audio/on')
+            # Configure doorbell for two-way audio
+            await doorbell.set_status_light(True)
+            await doorbell.set_mic_volume(100)
+            await doorbell.set_speaker_volume(100)
+            
+            # Start two-way audio session
+            await doorbell.start_audio_call()
+            
             return jsonify({'status': 'success'})
+            
         except Exception as e:
-            logger.error(f"Error activating doorbell audio: {str(e)}")
-            return jsonify({'error': 'Failed to activate doorbell audio'}), 500
-
+            logger.error(f"Error configuring doorbell: {str(e)}")
+            return jsonify({'error': 'Failed to configure doorbell'}), 500
+        
     except Exception as e:
         logger.error(f"Error answering doorbell: {str(e)}")
         return jsonify({'error': str(e)}), 500
+    finally:
+        # Ensure proper cleanup
+        if 'doorbell' in locals():
+            try:
+                await doorbell.stop_audio_call()
+                await doorbell.set_status_light(False)
+            except Exception as cleanup_error:
+                logger.error(f"Error in doorbell cleanup: {str(cleanup_error)}")
 
 @app.route('/api/weather')
 @rate_limit_decorator(min_interval=1)

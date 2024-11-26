@@ -19,3 +19,10 @@ flask-socketio
 unifi-api
 python-engineio
 python-socketio
+urllib3
+opencv-python-headless
+opencv-python
+unifi-video
+numpy
+tflite-runtime
+numpy==1.24.3

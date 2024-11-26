@@ -88,7 +88,10 @@
         <div id="doorbell-events" class="doorbell-events"></div>
         <div class="doorbell-widget" id="doorbell-widget" style="display: none;">
         <h3><i class="fas fa-doorbell"></i> Doorbell Camera</h3>
-        <div class="doorbell-feed" id="doorbell-feed"></div>
+        <div class="doorbell-feed-container" style="position: relative;">
+            <img class="doorbell-feed" id="doorbell-feed" alt="Doorbell Feed">
+            <canvas id="detection-overlay" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
+        </div>
         <div class="doorbell-controls">
             <button class="answer-btn" onclick="answerDoorbell()">
                 <i class="fas fa-phone"></i> Answer
